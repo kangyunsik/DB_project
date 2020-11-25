@@ -39,9 +39,9 @@ public class Driver {
 	static NodeList nList;
 	static Node node;
 	
-	static String url = "jdbc:postgresql://localhost:5432/";
-	static String user = "postgres";
-	static String password = "qqqq";
+	static String url = "jdbc:postgresql://localhost/dbpro";
+	static String user = "test";
+	static String password = "test";
 	
 	static int user_sid = 0;
 	static String user_id=null;
@@ -211,10 +211,6 @@ public class Driver {
 		
 		
 		
-		update_database();
-		
-		
-		
 		while(true) {
 			System.out.println("----------------------------");
 			System.out.println("1. 개인정보 수정");
@@ -260,8 +256,9 @@ public class Driver {
 				System.out.println("----------------------------");
 				System.out.println(" 레시피 재료목록 업데이트를 진행합니다.  ");
 				System.out.println("----------------------------");
-
-				Update_foodDB();
+				
+				Update_database();
+				//Update_foodDB();
 			}
 			else if(type.equals("9")){
 				System.out.println("----------------------------");
@@ -271,16 +268,26 @@ public class Driver {
 			}
 			else
 				System.out.println("잘못된 입력입니다");
+			
+			
+			
+			
+			
 		}
 	}
 	
-	private static void update_database() {
+	private static void Update_database() {
 		builderFactory = DocumentBuilderFactory.newInstance();
 		try {
 			builder = builderFactory.newDocumentBuilder();
 
+			System.out.println("레시피 정보 테이블을 업데이트중입니다.");
 			set_RecipeInfo_make();						// recipeinfo 테이블에 tuple : rid, rname, cookingtime 넣기.
+			System.out.println("레시피 정보 테이블 조리 과정을 업데이트중입니다.");
 			set_RecipeInfo_update_cookingprocess();		// recipeinfo 테이블 각각 tuple에 cookingprocess 추가.
+			System.out.println("재료 테이블을 업데이트중입니다.");
+			Update_foodDB();
+			System.out.println("업데이트가 완료되었습니다.");
 			
 		}catch(Exception e) {
 			e.getStackTrace();
@@ -291,11 +298,18 @@ public class Driver {
 		urlBuilder = new StringBuilder(
 				"http://211.237.50.150:7080/openapi/d68c8082a8eef4b3573701caf72dcb0626a3bb238896f37c3aa3adf55d0a1509/xml/Grid_20150827000000000226_1/1/1000");
 
+		rs = st.executeQuery("select count(*) from pg_tables where tablename = 'recipeinfo'");
+		rs.next();
+		
+		if(rs.getInt(1) == 0) {
+			st.execute("create table recipeinfo(rID int, rName text, Num int, CookingTime int, CookingProcess text)");
+		}
+		
+		
 		v_url = new URL(urlBuilder.toString());
 		htcon = (HttpURLConnection) v_url.openConnection();
 		htcon.setRequestMethod("GET");
 		htcon.setRequestProperty("Content-type", "application/json");
-		System.out.println("Response code: " + htcon.getResponseCode());		// 응답 테스트
 		BufferedReader rd;
 		if (htcon.getResponseCode() >= 200 && htcon.getResponseCode() <= 300) {
 			rd = new BufferedReader(new InputStreamReader(htcon.getInputStream()));
@@ -308,12 +322,13 @@ public class Driver {
 			sb.append(line);
 		}
 
+		
+		
 		document = builder.parse(v_url.toString());
 		document.getDocumentElement().normalize();
 
 		nList = document.getElementsByTagName("Grid_20150827000000000226_1");
 		node = nList.item(0);
-		System.out.println(getTagValue("totalCnt", (Element) node));			// 받아온 개수 출력
 
 		nList = document.getElementsByTagName("row");
 		for (int i = 0; i < nList.getLength(); i++) {
@@ -321,28 +336,46 @@ public class Driver {
 
 			if (nNode.getNodeType() == Node.ELEMENT_NODE) {
 				Element eElement = (Element) nNode;
-				String recipeinfo_update = String.format("insert into RecipeInfo values(%d,'%s',null,%d,null)",
-						Integer.parseInt(getTagValue("RECIPE_ID", eElement)),
-						getTagValue("RECIPE_NM_KO", eElement),
-						Integer.parseInt(getTagValue("COOKING_TIME", eElement).split("분")[0]));
-				st.executeUpdate(recipeinfo_update);
+				String recipeinfo_update;
+				int rID;
+				
+				String check = String.format("select count(*) from recipeinfo where rID = %d",Integer.parseInt(getTagValue("RECIPE_ID", eElement)));
+				rs = st.executeQuery(check);
+				rs.next();
+				
+				rID = rs.getInt(1);
+				if(rID > 0) {	// rID가 이미 존재하면, update 수행하는 쿼리 작성
+					recipeinfo_update = String.format("update recipeinfo set "
+							+ "rName = '%s',"
+							+ "CookingTime = %d "
+							+ "where rID = %d",
+							getTagValue("RECIPE_NM_KO", eElement),
+							Integer.parseInt(getTagValue("COOKING_TIME", eElement).split("분")[0]),
+							Integer.parseInt(getTagValue("RECIPE_ID", eElement)));
+					
+				}else {			// rID가 존재하지 않으면, insert 수행하는 쿼리 작성
+					recipeinfo_update = String.format("insert into recipeinfo values(%d,'%s',null,%d,null)",
+							Integer.parseInt(getTagValue("RECIPE_ID", eElement)),
+							getTagValue("RECIPE_NM_KO", eElement),
+							Integer.parseInt(getTagValue("COOKING_TIME", eElement).split("분")[0]));
+				}
+				
+				st.executeUpdate(recipeinfo_update);	// 쿼리 수행.
 			}
 		}
 	}
 	private static void set_RecipeInfo_update_cookingprocess() throws IOException, SAXException, SQLException {
-		for (int t = 0; t < 4; t++) {
+		for (int t = 0; t < 4; t++) {				// 4 * 1000개. 최대 4000개 update 가능.
 			urlBuilder = new StringBuilder(
 					"http://211.237.50.150:7080/openapi/d68c8082a8eef4b3573701caf72dcb0626a3bb238896f37c3aa3adf55d0a1509/xml/Grid_20150827000000000228_1/1/1000");
 			v_url = new URL(urlBuilder.toString());
 			htcon = (HttpURLConnection)v_url.openConnection();
-			System.out.println("Response code: " + htcon.getResponseCode());
 
 			document = builder.parse(v_url.toString());
 			document.getDocumentElement().normalize();
 
 			nList = document.getElementsByTagName("Grid_20150827000000000228_1");
 			node = nList.item(0);
-			System.out.println(getTagValue("totalCnt", (Element) node));
 
 			nList = document.getElementsByTagName("row");
 			for (int i = 0; i < nList.getLength(); i++) {
@@ -351,7 +384,7 @@ public class Driver {
 				if (nNode.getNodeType() == Node.ELEMENT_NODE) {
 					Element eElement = (Element) nNode;
 					String recipeinfo_update = String.format(
-							"update RecipeInfo set cookingprocess = '%s' where rid = %d",
+							"update recipeinfo set cookingprocess = '%s' where rid = %d",
 							getTagValue("COOKING_DC", eElement),
 							Integer.parseInt(getTagValue("RECIPE_ID", eElement)));
 
@@ -362,20 +395,16 @@ public class Driver {
 	}
 
 	private static void Update_foodDB() throws Exception {
-		String isExist = "select count(*) from Recipe";
-		ResultSet n = st.executeQuery(isExist);
-		n.next();
-		if(n.getInt(1) > 0) {
-			String drop_RecipeTable = "drop table Recipe";
-			st.execute(drop_RecipeTable);
-			String Create_RecipeTable = "create table Recipe(rID int, fName text, requiredNumber int)";
+		
+		rs = st.executeQuery("select count(*) from pg_tables where tablename = 'recipe'");
+		rs.next();
+		if(rs.getInt(1) == 0) {
+			String Create_RecipeTable = "create table recipe(rID int, fName text, requiredNumber int)";
 			st.execute(Create_RecipeTable);
 		}
-		else {
-			String Create_RecipeTable = "create table Recipe(rID int, fName text, requiredNumber int)";
-			st.execute(Create_RecipeTable);
-		}
+		
 		int foodCnt = 99999;
+		
 		for(int start = 1, end = 1000; start <= foodCnt ;start = start + 1000, end = end + 1000) {
 			StringBuilder urlBuilder = new StringBuilder("http://211.237.50.150:7080/openapi/15461637ad1e73e3c432ddec0ec105cf559634437fc1d16b3d610b100ea2fb6c/xml/Grid_20150827000000000227_1");
 			urlBuilder.append("/" + URLEncoder.encode(Integer.toString(start), "UTF-8"));
@@ -396,12 +425,34 @@ public class Driver {
 	        for(int i=0;i<nList.getLength(); i++) {
 	        	Node nNode = nList.item(i);
 	        	if(nNode.getNodeType() == Node.ELEMENT_NODE) {
+	        		int rID;
 	        		Element eElement = (Element)nNode;
+	        		
 	        		String amount = getTagValue("IRDNT_CPCTY", eElement);
-	        		int Get_amount = getAmount(amount);
-	        		String fname = getTagValue("IRDNT_NM", eElement);
-	       		 	st.executeUpdate("insert into Recipe values (" + getTagValue("RECIPE_ID", eElement) + ",'" + fname + "', " + Get_amount + ");");
-	       		 	System.out.println(getTagValue("RECIPE_ID", eElement) +" "+getTagValue("IRDNT_NM", eElement) +" "+ getTagValue("IRDNT_CPCTY", eElement));
+					int Get_amount = getAmount(amount);
+					String fname = getTagValue("IRDNT_NM", eElement);
+					int Get_rID = Integer.parseInt(getTagValue("RECIPE_ID", eElement));
+					
+	        		String check = String.format("select count(*) from recipe where rID = %d",Get_rID);
+					rs = st.executeQuery(check);
+					rs.next();
+					
+					rID = rs.getInt(1);
+	        		
+					if(rID > 0) {	// rID가 이미 존재하면, update 수행.
+						String update_recipe = String.format("update recipe set "
+								+ "fName = '%s', "
+								+ "requiredNumber = '%d' "
+								+ "where rID = %d",
+								fname,
+								Get_amount,
+								rID);
+						st.executeUpdate(update_recipe);
+					} else {		// rID가 존재하지 않으면, insert 수행.
+						st.executeUpdate("insert into recipe values (" + getTagValue("RECIPE_ID", eElement) + ",'"
+								+ fname + "', " + Get_amount + ");");
+						
+					}
 	        	}
 	        }
         }
@@ -410,7 +461,6 @@ public class Driver {
 	private static int getAmount(String str) {
 		String intStr = "";
 		boolean flag = false;
-		System.out.println(str);
 		if(str == null) return 0;
 		for (int i = 0; i < str.length(); i++) {
 		    char ch = str.charAt(i);
@@ -432,6 +482,4 @@ public class Driver {
 		if(nValue == null) return null;
 		return nValue.getNodeValue();
 	}
-	
-	
 }
